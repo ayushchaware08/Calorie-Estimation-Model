@@ -1,4 +1,4 @@
-# minimal calorie DB; extend with your dataset classes
+# calorie_db.py
 CALORIE_DB = {
     "apple": 95,
     "banana": 105,
@@ -8,23 +8,59 @@ CALORIE_DB = {
     "cake": 235,
     "sandwich": 250,
     "french_fries": 365,
-    # add more mappings...
+    "fried_chicken": 246,
+    "chow_mein": 281,
+    "boiled_egg": 77,
+    "donut": 195,
+    "salad": 152,
+    "sushi": 200,
+    "steak": 679,
+    "appam": 110,
+    "beetroot_poriyal": 85,
+    "carrot_poriyal": 75,
+    "chicken_65": 280,
+    "chicken_briyani": 320,
+    "dosa": 168,
+    "idly": 58,
+    "kaara_chutney": 45,
+    "kali": 180,
+    "koozh": 120,
+    "lemon_satham": 200,
+    "medu_vadai": 150,
+    "mushroom_briyani": 290,
+    "mutton_briyani": 380,
+    "nandu_masala": 220,
+    "nei_satham": 250,
+    "paal_kolukattai": 140,
+    "paneer_briyani": 310,
+    "paneer_masala": 260,
+    "parupu_vadai": 130,
+    "pidi_kolukattai": 125,
+    "poorna_kolukattai": 160,
+    "prawn_thokku": 180,
+    "puthina_chutney": 40,
+    "sambar": 95,
+    "sambar_satham": 220,
+    "satham": 205,
+    "thengai_chutney": 65,
+    "veg_briyani": 270,
+    "ven_pongal": 190,
 }
 
 def canonicalize_class(name: str) -> str:
-    """
-    Normalize a class name to match CALORIE_DB keys:
-      - lower, strip, replace spaces with underscores
-      - basic synonyms mapping can be added here
-    """
     if not name:
         return name
     n = name.lower().strip().replace(" ", "_")
-    # simple synonyms
     synonyms = {
         "burger": "burger_beef",
+        "beef_burger": "burger_beef",
+        "chicken_burger": "burger_chicken",
         "fries": "french_fries",
         "chips": "french_fries",
+        "fried_chicken": "fried_chicken",
+        "chow mein": "chow_mein",
+        "boiled egg": "boiled_egg",
         "doughnut": "donut",
+        
     }
     return synonyms.get(n, n)
