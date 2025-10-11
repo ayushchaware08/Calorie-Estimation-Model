@@ -1,0 +1,6 @@
+fastapi==0.100.0
+uvicorn[standard]==0.22.0
+pillow==10.0.0
+numpy==1.26.0
+ultralytics==8.2.103
+roboflow==0.2.22

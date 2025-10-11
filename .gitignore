@@ -1,0 +1,9 @@
+Image Dataset/
+!.gitignore
+__pycache__/
+*.pyc
+venv/
+.env
+.pytest_cache/
+.DS_Store
+.benchmarks/
