@@ -4,7 +4,7 @@ import io
 from typing import Any, Dict, List, Optional, Union
 from ultralytics import YOLO
 from PIL import Image
-from .calorie_db import CALORIE_DB, canonicalize_class
+from calorie_db import CALORIE_DB, canonicalize_class
 
 ImageLike = Union[str, bytes, io.BytesIO, Image.Image]
 
@@ -103,7 +103,15 @@ class CalorieModel:
                     
                     raw_label = names.get(cls_id, str(cls_id))
                     canon = canonicalize_class(raw_label)
-                    calories = CALORIE_DB.get(canon)
+                    food_data = CALORIE_DB.get(canon)
+                    
+                    # Extract calories from food_data
+                    calories = None
+                    if food_data is not None:
+                        if isinstance(food_data, dict):
+                            calories = food_data.get("calories", 0)
+                        else:
+                            calories = food_data
                     
                     items.append({
                         "label": raw_label,
@@ -116,11 +124,26 @@ class CalorieModel:
                     print(f"Error processing detection box: {e}")
                     continue
 
-        # Calculate total calories, safely handling None values
+        # Calculate total calories, fats and protein, safely handling None values
         total_calories = 0
+        total_fats = 0
+        total_protein = 0
+        
         for it in items:
             calories = it.get("calories")
             if calories is not None and calories > 0:
                 total_calories += float(calories)
-        
-        return {"items": items, "total_calories": total_calories}
+            
+            # Get fats and protein from CALORIE_DB if available
+            canon = it.get("label_canonical")
+            if canon and canon in CALORIE_DB:
+                food_data = CALORIE_DB[canon]
+                if isinstance(food_data, dict):
+                    fats = food_data.get("fats", 0)
+                    protein = food_data.get("protein", 0)
+                    if fats is not None and fats > 0:
+                        total_fats += float(fats)
+                    if protein is not None and protein > 0:
+                        total_protein += float(protein)
+
+        return {"items": items, "total_calories": total_calories, "total_fats": total_fats, "total_protein": total_protein}
