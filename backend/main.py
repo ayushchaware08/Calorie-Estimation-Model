@@ -63,6 +63,15 @@ async def predict(file: UploadFile = File(...), session_id: Optional[str] = None
     if session_id is None:
         session_id = str(uuid.uuid4())
 
+    # Validate file size
+    MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+    if file.size > MAX_FILE_SIZE:
+        raise HTTPException(413, "File too large")
+    
+    # Add MIME type validation BEFORE reading
+    if file.content_type not in ["image/jpeg", "image/png", "image/gif"]:
+        raise HTTPException(status_code=400, detail="Invalid file type. Only JPEG, PNG, and GIF files are allowed.")
+
     contents = await file.read()
     start_time = time.time()
     
