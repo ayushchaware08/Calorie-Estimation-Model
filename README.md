@@ -5,8 +5,14 @@
 <video controls src="Screen Recording 2025-09-07 020911.mp4" title="Calorie Estimation Demo"></video>
 
 ## Results
-![alt text](results-1.jpeg)
-![alt text](image-1.png)
+![alt text](Images/results-1.jpeg)
+![alt text](Images/demo.png)
+
+## Dashboard
+![alt text](Images/demo1.png)
+![alt text](Images/demo2.png)
+![alt text](Images/demo3.png)
+
 ## 🚀 Features
 
 - **Real-time Food Detection**: Uses YOLOv8 to identify multiple food items in a single image
