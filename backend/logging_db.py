@@ -52,11 +52,41 @@ class PredictionLogger:
                 )
             """)
             
+            # Create user_confirmations table for top-3 predictions and user selections
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS user_confirmations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id TEXT NOT NULL,
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    top_prediction TEXT,
+                    top_confidence REAL,
+                    second_prediction TEXT,
+                    second_confidence REAL,
+                    third_prediction TEXT,
+                    third_confidence REAL,
+                    user_selected_option INTEGER,
+                    user_final_choice TEXT NOT NULL,
+                    is_custom_entry BOOLEAN DEFAULT 0,
+                    custom_food_name TEXT,
+                    final_calories REAL,
+                    final_protein REAL,
+                    final_fats REAL,
+                    confidence_threshold REAL,
+                    was_confident BOOLEAN,
+                    image_reference TEXT,
+                    notes TEXT,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
             # Create indexes for better query performance
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_predictions_timestamp ON predictions(timestamp)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_predictions_session ON predictions(session_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_items_prediction ON detected_items(prediction_id)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_items_label ON detected_items(label_canonical)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_confirmations_session ON user_confirmations(session_id)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_confirmations_timestamp ON user_confirmations(timestamp)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_confirmations_custom ON user_confirmations(is_custom_entry)")
             
             conn.commit()
             logger.info("Database initialized successfully")
@@ -260,3 +290,177 @@ class PredictionLogger:
         except Exception as e:
             logger.error(f"Failed to get calorie trends: {e}")
             return []
+    
+    def log_user_confirmation(
+        self,
+        session_id: str,
+        top_predictions: List[Dict[str, Any]],
+        user_selection: int,
+        final_choice: str,
+        is_custom_entry: bool = False,
+        custom_food_name: Optional[str] = None,
+        nutritional_info: Optional[Dict[str, Any]] = None,
+        confidence_threshold: Optional[float] = None,
+        was_confident: Optional[bool] = None,
+        image_reference: Optional[str] = None,
+        notes: Optional[str] = None
+    ) -> int:
+        """
+        Log user confirmation/selection after top-3 predictions.
+        
+        Args:
+            session_id: Session identifier
+            top_predictions: List of top 3 predictions with confidence scores
+            user_selection: Index of selected option (1-3 for predictions, 4 for custom)
+            final_choice: Final food name selected/entered by user
+            is_custom_entry: Whether user entered custom food name
+            custom_food_name: Custom food name if entered
+            nutritional_info: Nutritional data for final choice
+            confidence_threshold: Threshold used for prediction
+            was_confident: Whether top prediction met confidence threshold
+            image_reference: Reference to image file
+            notes: Additional notes
+            
+        Returns:
+            ID of logged confirmation record
+        """
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Extract top 3 predictions data (pad with None if less than 3)
+                top_pred = top_predictions[0] if len(top_predictions) > 0 else {}
+                second_pred = top_predictions[1] if len(top_predictions) > 1 else {}
+                third_pred = top_predictions[2] if len(top_predictions) > 2 else {}
+                
+                # Extract nutritional info
+                final_calories = nutritional_info.get("calories", 0) if nutritional_info else 0
+                final_protein = nutritional_info.get("protein", 0) if nutritional_info else 0
+                final_fats = nutritional_info.get("fats", 0) if nutritional_info else 0
+                
+                cursor.execute("""
+                    INSERT INTO user_confirmations 
+                    (session_id, top_prediction, top_confidence,
+                     second_prediction, second_confidence,
+                     third_prediction, third_confidence,
+                     user_selected_option, user_final_choice,
+                     is_custom_entry, custom_food_name,
+                     final_calories, final_protein, final_fats,
+                     confidence_threshold, was_confident,
+                     image_reference, notes)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    session_id,
+                    top_pred.get("label"),
+                    top_pred.get("confidence"),
+                    second_pred.get("label"),
+                    second_pred.get("confidence"),
+                    third_pred.get("label"),
+                    third_pred.get("confidence"),
+                    user_selection,
+                    final_choice,
+                    is_custom_entry,
+                    custom_food_name,
+                    final_calories,
+                    final_protein,
+                    final_fats,
+                    confidence_threshold,
+                    was_confident,
+                    image_reference,
+                    notes
+                ))
+                
+                confirmation_id = cursor.lastrowid
+                conn.commit()
+                logger.info(f"Logged user confirmation {confirmation_id} for session {session_id}")
+                return confirmation_id
+                
+        except Exception as e:
+            logger.error(f"Failed to log user confirmation: {e}")
+            return -1
+    
+    def get_user_confirmations(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        session_id: Optional[str] = None,
+        include_custom_only: bool = False
+    ) -> List[Dict[str, Any]]:
+        """Get user confirmation logs with filters"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                query = "SELECT * FROM user_confirmations WHERE 1=1"
+                params = []
+                
+                if session_id:
+                    query += " AND session_id = ?"
+                    params.append(session_id)
+                
+                if include_custom_only:
+                    query += " AND is_custom_entry = 1"
+                
+                query += " ORDER BY timestamp DESC LIMIT ? OFFSET ?"
+                params.extend([limit, offset])
+                
+                cursor.execute(query, params)
+                
+                return [dict(row) for row in cursor.fetchall()]
+                
+        except Exception as e:
+            logger.error(f"Failed to get user confirmations: {e}")
+            return []
+    
+    def get_confirmation_statistics(self, days: int = 7) -> Dict[str, Any]:
+        """Get statistics about user confirmations and model accuracy"""
+        try:
+            with self.get_connection() as conn:
+                cursor = conn.cursor()
+                
+                # Overall stats
+                cursor.execute("""
+                    SELECT 
+                        COUNT(*) as total_confirmations,
+                        SUM(CASE WHEN user_selected_option = 1 THEN 1 ELSE 0 END) as accepted_top_prediction,
+                        SUM(CASE WHEN user_selected_option IN (2, 3) THEN 1 ELSE 0 END) as selected_alternative,
+                        SUM(CASE WHEN is_custom_entry = 1 THEN 1 ELSE 0 END) as custom_entries,
+                        AVG(CASE WHEN user_selected_option = 1 THEN top_confidence ELSE NULL END) as avg_confidence_when_accepted,
+                        AVG(top_confidence) as avg_top_confidence,
+                        SUM(CASE WHEN was_confident = 1 THEN 1 ELSE 0 END) as high_confidence_predictions,
+                        SUM(CASE WHEN was_confident = 0 THEN 1 ELSE 0 END) as low_confidence_predictions
+                    FROM user_confirmations 
+                    WHERE timestamp > datetime('now', '-{} days')
+                """.format(days))
+                
+                stats = dict(cursor.fetchone())
+                
+                # Calculate accuracy metrics
+                total = stats.get("total_confirmations", 0)
+                if total > 0:
+                    stats["top_prediction_accuracy"] = round((stats.get("accepted_top_prediction", 0) / total) * 100, 2)
+                    stats["alternative_selection_rate"] = round((stats.get("selected_alternative", 0) / total) * 100, 2)
+                    stats["custom_entry_rate"] = round((stats.get("custom_entries", 0) / total) * 100, 2)
+                else:
+                    stats["top_prediction_accuracy"] = 0
+                    stats["alternative_selection_rate"] = 0
+                    stats["custom_entry_rate"] = 0
+                
+                # Most commonly custom-entered foods
+                cursor.execute("""
+                    SELECT custom_food_name, COUNT(*) as count
+                    FROM user_confirmations
+                    WHERE is_custom_entry = 1 
+                    AND timestamp > datetime('now', '-{} days')
+                    GROUP BY custom_food_name
+                    ORDER BY count DESC
+                    LIMIT 10
+                """.format(days))
+                
+                stats["most_custom_entries"] = [dict(row) for row in cursor.fetchall()]
+                
+                return stats
+                
+        except Exception as e:
+            logger.error(f"Failed to get confirmation statistics: {e}")
+            return {}

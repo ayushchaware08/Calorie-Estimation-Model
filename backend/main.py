@@ -1,8 +1,10 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, UploadFile, File, HTTPException, Query, WebSocket, WebSocketDisconnect, Body
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 from model import CalorieModel
 from logging_db import PredictionLogger
+from prediction_handler import PredictionHandler
 from websocket_manager import ConnectionManager
 import io
 from PIL import Image
@@ -11,7 +13,7 @@ import os
 import time
 import uuid
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -28,13 +30,27 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Pydantic models for request/response
+class UserConfirmationRequest(BaseModel):
+    session_id: str
+    selected_option: int  # 1-3 for predictions, 4 for custom
+    custom_food_name: Optional[str] = None
+    notes: Optional[str] = None
+
+class CustomFoodRequest(BaseModel):
+    session_id: str
+    food_name: str
+    quantity: float = 1.0
+    notes: Optional[str] = None
+
 model: CalorieModel | None = None
 prediction_logger: PredictionLogger | None = None
+prediction_handler: PredictionHandler | None = None
 websocket_manager = ConnectionManager()
 
 @app.on_event("startup")
 def _startup():
-    global model, prediction_logger
+    global model, prediction_logger, prediction_handler
     try:
         model = CalorieModel()
         logger.info("Model loaded successfully")
@@ -43,11 +59,16 @@ def _startup():
         prediction_logger = PredictionLogger()
         logger.info("Prediction logger initialized successfully")
         
+        # Initialize prediction handler with 70% confidence threshold
+        prediction_handler = PredictionHandler(model, confidence_threshold=0.70)
+        logger.info("Prediction handler initialized successfully")
+        
         logger.info("WebSocket manager initialized successfully")
     except Exception as e:
         logger.error(f"Startup initialization failed: {e}")
         model = None
         prediction_logger = None
+        prediction_handler = None
 
 @app.get("/health")
 def health():
@@ -115,6 +136,162 @@ async def predict(file: UploadFile = File(...), session_id: Optional[str] = None
 
     return result
 
+@app.post("/predict/top3")
+async def predict_with_top3(file: UploadFile = File(...), session_id: Optional[str] = None):
+    """
+    Get top-3 food predictions with confidence scores.
+    Returns recommendations for user to confirm or enter custom food.
+    """
+    if model is None or prediction_handler is None:
+        raise HTTPException(status_code=503, detail="Model not loaded")
+
+    # Generate session ID if not provided
+    if session_id is None:
+        session_id = str(uuid.uuid4())
+
+    # Validate file size
+    MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+    if file.size > MAX_FILE_SIZE:
+        raise HTTPException(413, "File too large")
+    
+    # Add MIME type validation
+    if file.content_type not in ["image/jpeg", "image/png", "image/gif"]:
+        raise HTTPException(status_code=400, detail="Invalid file type. Only JPEG, PNG, and GIF files are allowed.")
+
+    contents = await file.read()
+    start_time = time.time()
+    
+    try:
+        image = Image.open(io.BytesIO(contents)).convert("RGB")
+        image_size = image.size
+    except Exception as e:
+        return JSONResponse(status_code=400, content={"error": "Invalid image file", "detail": str(e)})
+
+    try:
+        # Use prediction handler to get top-3 recommendations
+        result = prediction_handler.process_prediction(image, session_id=session_id)
+        processing_time_ms = (time.time() - start_time) * 1000
+        
+        result["processing_time_ms"] = processing_time_ms
+        result["image_size"] = f"{image_size[0]}x{image_size[1]}"
+        
+        # Store in temporary session for later confirmation
+        # (In production, you might use Redis or similar for session management)
+        
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": "Prediction failed", "detail": str(e)})
+
+    return result
+
+@app.post("/confirm")
+async def confirm_prediction(confirmation: UserConfirmationRequest):
+    """
+    Log user's confirmation/selection after viewing top-3 predictions.
+    Handles acceptance of prediction or custom food entry.
+    """
+    if prediction_logger is None or prediction_handler is None:
+        raise HTTPException(status_code=503, detail="Service not available")
+    
+    try:
+        # Determine what the user selected
+        is_custom = confirmation.selected_option == 4 or confirmation.custom_food_name is not None
+        
+        if is_custom and not confirmation.custom_food_name:
+            raise HTTPException(status_code=400, detail="Custom food name required when selecting custom option")
+        
+        # Get nutritional info for the final choice
+        if is_custom:
+            final_choice = confirmation.custom_food_name
+            nutritional_info = prediction_handler.calculate_nutritional_info(final_choice)
+        else:
+            # User selected one of the top predictions
+            # In production, you'd retrieve the predictions from session storage
+            # For now, we'll recalculate (this could be optimized)
+            final_choice = f"Selected option {confirmation.selected_option}"
+            nutritional_info = {"calories": 0, "protein": 0, "fats": 0}
+        
+        # Log the confirmation
+        # Note: You'll need to store top_predictions in session to retrieve here
+        # For now, using empty list as placeholder
+        confirmation_id = prediction_logger.log_user_confirmation(
+            session_id=confirmation.session_id,
+            top_predictions=[],  # Should come from session storage
+            user_selection=confirmation.selected_option,
+            final_choice=final_choice,
+            is_custom_entry=is_custom,
+            custom_food_name=confirmation.custom_food_name,
+            nutritional_info=nutritional_info,
+            notes=confirmation.notes
+        )
+        
+        return {
+            "confirmation_id": confirmation_id,
+            "session_id": confirmation.session_id,
+            "final_choice": final_choice,
+            "nutritional_info": nutritional_info,
+            "message": "Confirmation logged successfully"
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to log confirmation: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to log confirmation: {str(e)}")
+
+@app.post("/custom-entry")
+async def add_custom_food_entry(request: CustomFoodRequest):
+    """
+    Record a custom food entry with nutritional information.
+    Used when user enters food name manually.
+    """
+    if prediction_handler is None or prediction_logger is None:
+        raise HTTPException(status_code=503, detail="Service not available")
+    
+    try:
+        # Calculate nutritional info for the custom food
+        nutritional_info = prediction_handler.calculate_nutritional_info(
+            request.food_name,
+            quantity=request.quantity
+        )
+        
+        # Log as custom entry
+        confirmation_id = prediction_logger.log_user_confirmation(
+            session_id=request.session_id,
+            top_predictions=[],
+            user_selection=4,  # 4 = custom entry
+            final_choice=request.food_name,
+            is_custom_entry=True,
+            custom_food_name=request.food_name,
+            nutritional_info=nutritional_info,
+            notes=request.notes
+        )
+        
+        return {
+            "confirmation_id": confirmation_id,
+            "session_id": request.session_id,
+            "food_name": request.food_name,
+            "quantity": request.quantity,
+            "nutritional_info": nutritional_info,
+            "message": "Custom food entry logged successfully"
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to log custom entry: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to log custom entry: {str(e)}")
+
+@app.get("/nutritional-info/{food_name}")
+async def get_nutritional_info(food_name: str, quantity: float = Query(1.0, gt=0)):
+    """
+    Get nutritional information for a specific food item.
+    """
+    if prediction_handler is None:
+        raise HTTPException(status_code=503, detail="Service not available")
+    
+    try:
+        info = prediction_handler.calculate_nutritional_info(food_name, quantity)
+        return info
+    except Exception as e:
+        logger.error(f"Failed to get nutritional info: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get nutritional info: {str(e)}")
+
 # Log retrieval endpoints
 @app.get("/logs/recent")
 async def get_recent_logs(limit: int = Query(100, ge=1, le=1000), offset: int = Query(0, ge=0)):
@@ -178,6 +355,55 @@ async def get_summary_stats():
     except Exception as e:
         logger.error(f"Failed to retrieve summary: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve summary")
+
+@app.get("/logs/confirmations")
+async def get_confirmation_logs(
+    limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+    session_id: Optional[str] = None,
+    custom_only: bool = False
+):
+    """Get user confirmation logs with optional filters"""
+    if prediction_logger is None:
+        raise HTTPException(status_code=503, detail="Logging service not available")
+    
+    try:
+        logs = prediction_logger.get_user_confirmations(
+            limit=limit,
+            offset=offset,
+            session_id=session_id,
+            include_custom_only=custom_only
+        )
+        return {
+            "confirmations": logs,
+            "limit": limit,
+            "offset": offset,
+            "count": len(logs),
+            "filters": {
+                "session_id": session_id,
+                "custom_only": custom_only
+            }
+        }
+    except Exception as e:
+        logger.error(f"Failed to retrieve confirmation logs: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve confirmation logs")
+
+@app.get("/logs/confirmation-stats")
+async def get_confirmation_statistics(days: int = Query(7, ge=1, le=365)):
+    """Get statistics about user confirmations and model accuracy"""
+    if prediction_logger is None:
+        raise HTTPException(status_code=503, detail="Logging service not available")
+    
+    try:
+        stats = prediction_logger.get_confirmation_statistics(days=days)
+        return {
+            "statistics": stats,
+            "period_days": days,
+            "message": "Confirmation statistics retrieved successfully"
+        }
+    except Exception as e:
+        logger.error(f"Failed to retrieve confirmation statistics: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve confirmation statistics")
 
 # WebSocket endpoint for real-time updates
 @app.websocket("/ws")
