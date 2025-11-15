@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Food Calorie Estimation</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="logo">
+                <span class="logo-icon">🍽️</span>
+                <h1>Calorie Estimator</h1>
+            </div>
+            <nav class="nav-tabs">
+                <button class="nav-tab active" onclick="showTab('home')">
+                    🏠 Home
+                </button>
+                <button class="nav-tab" onclick="showTab('dashboard')">
+                    📊 Dashboard
+                </button>
+            </nav>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content" id="home-tab-content">
+            <!-- Upload Section -->
+            <section id="upload-section" class="section active">
+                <div class="upload-card">
+                    <div class="upload-icon">📸</div>
+                    <h2>Upload Food Image</h2>
+                    <p>Take or upload a photo of your food to get nutritional information</p>
+                    
+                    <div class="upload-area" id="upload-area">
+                        <input type="file" id="file-input" accept="image/*" hidden>
+                        <div class="upload-content">
+                            <svg class="upload-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                <polyline points="17 8 12 3 7 8"></polyline>
+                                <line x1="12" y1="3" x2="12" y2="15"></line>
+                            </svg>
+                            <p class="upload-text">Click to upload or drag and drop</p>
+                            <p class="upload-subtext">PNG, JPG, GIF up to 10MB</p>
+                        </div>
+                    </div>
+
+                    <button class="btn btn-primary" onclick="document.getElementById('file-input').click()">
+                        Choose Image
+                    </button>
+                </div>
+            </section>
+
+            <!-- Loading Section -->
+            <section id="loading-section" class="section">
+                <div class="loading-card">
+                    <div class="spinner"></div>
+                    <h2>Analyzing your food...</h2>
+                    <p>Our AI is detecting food items and calculating nutrition</p>
+                </div>
+            </section>
+
+            <!-- Results Section (High Confidence) -->
+            <section id="high-confidence-section" class="section">
+                <div class="result-card">
+                    <div class="confidence-badge high">
+                        <span class="confidence-icon">✓</span>
+                        <span id="high-confidence-text">High Confidence</span>
+                    </div>
+
+                    <div class="detected-food">
+                        <h2>Detected: <span id="detected-food-name">Pizza</span></h2>
+                        <div class="confidence-bar">
+                            <div class="confidence-fill" id="confidence-fill"></div>
+                            <span class="confidence-percent" id="confidence-percent">85%</span>
+                        </div>
+                    </div>
+
+                    <div class="nutrition-summary">
+                        <div class="nutrition-item">
+                            <div class="nutrition-icon">🔥</div>
+                            <div class="nutrition-value" id="high-calories">285</div>
+                            <div class="nutrition-label">Calories</div>
+                        </div>
+                        <div class="nutrition-item">
+                            <div class="nutrition-icon">🥩</div>
+                            <div class="nutrition-value" id="high-protein">12g</div>
+                            <div class="nutrition-label">Protein</div>
+                        </div>
+                        <div class="nutrition-item">
+                            <div class="nutrition-icon">🧈</div>
+                            <div class="nutrition-value" id="high-fats">10g</div>
+                            <div class="nutrition-label">Fats</div>
+                        </div>
+                    </div>
+
+                    <div class="action-buttons">
+                        <button class="btn btn-success" onclick="confirmSelection(1)">
+                            ✓ Accept
+                        </button>
+                        <button class="btn btn-secondary" onclick="showAlternatives()">
+                            See Other Options
+                        </button>
+                        <button class="btn btn-outline" onclick="showManualEntry()">
+                            Enter Manually
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Results Section (Low Confidence) -->
+            <section id="low-confidence-section" class="section">
+                <div class="result-card">
+                    <div class="confidence-badge low">
+                        <span class="confidence-icon">⚠️</span>
+                        <span>Low Confidence</span>
+                    </div>
+
+                    <h2>Please Select the Food</h2>
+                    <p class="selection-message" id="low-confidence-message">
+                        We're not quite sure what this is. Please select from the options below or enter manually.
+                    </p>
+
+                    <div class="options-list" id="options-list">
+                        <!-- Options will be inserted here dynamically -->
+                    </div>
+
+                    <button class="btn btn-outline" onclick="showManualEntry()">
+                        ✍️ Enter Food Name Manually
+                    </button>
+                </div>
+            </section>
+
+            <!-- Manual Entry Section -->
+            <section id="manual-entry-section" class="section">
+                <div class="result-card">
+                    <h2>Enter Food Name</h2>
+                    <p>Type the name of the food you ate</p>
+
+                    <div class="input-group">
+                        <label for="food-name-input">Food Name</label>
+                        <input 
+                            type="text" 
+                            id="food-name-input" 
+                            placeholder="e.g., chicken biryani, pizza, salad"
+                            class="text-input"
+                        >
+                    </div>
+
+                    <div class="input-group">
+                        <label for="portion-size">Portion Size</label>
+                        <select id="portion-size" class="text-input">
+                            <option value="1">1 Plate</option>
+                            <option value="0.25">1 Small Bowl</option>
+                            <option value="0.5">1 Bowl</option>
+                            <option value="0.75">1 Cup</option>
+                            <option value="0.1">1 Spoon</option>
+                            <option value="1.5">Large Plate</option>
+                            <option value="1">1 Piece</option>
+                            <option value="0.3">Half Plate</option>
+                        </select>
+                    </div>
+
+                    <div class="input-group">
+                        <label for="notes-input">Notes (optional)</label>
+                        <textarea 
+                            id="notes-input" 
+                            placeholder="Add any additional notes..."
+                            class="text-input"
+                            rows="3"
+                        ></textarea>
+                    </div>
+
+                    <div class="action-buttons">
+                        <button class="btn btn-primary" onclick="submitCustomEntry()">
+                            Submit
+                        </button>
+                        <button class="btn btn-outline" onclick="goBackToOptions()">
+                            ← Back
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Success Section -->
+            <section id="success-section" class="section">
+                <div class="result-card success-card">
+                    <div class="success-icon">✓</div>
+                    <h2>Logged Successfully!</h2>
+                    <p>Your food entry has been saved</p>
+
+                    <div class="final-nutrition">
+                        <h3><span id="final-food-name">Pizza</span></h3>
+                        <div class="nutrition-grid">
+                            <div class="nutrition-box">
+                                <div class="nutrition-box-label">Calories</div>
+                                <div class="nutrition-box-value" id="final-calories">285</div>
+                            </div>
+                            <div class="nutrition-box">
+                                <div class="nutrition-box-label">Protein</div>
+                                <div class="nutrition-box-value" id="final-protein">12g</div>
+                            </div>
+                            <div class="nutrition-box">
+                                <div class="nutrition-box-label">Fats</div>
+                                <div class="nutrition-box-value" id="final-fats">10g</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="action-buttons">
+                        <button class="btn btn-primary" onclick="resetApp()">
+                            Add Another Food
+                        </button>
+                        <button class="btn btn-secondary" onclick="openDashboard()">
+                            View Dashboard
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Error Section -->
+            <section id="error-section" class="section">
+                <div class="result-card error-card">
+                    <div class="error-icon">❌</div>
+                    <h2>Oops! Something went wrong</h2>
+                    <p id="error-message">Unable to process your request. Please try again.</p>
+
+                    <button class="btn btn-primary" onclick="resetApp()">
+                        Try Again
+                    </button>
+                </div>
+            </section>
+        </main>
+
+        <!-- Dashboard Content -->
+        <main class="main-content" id="dashboard-tab-content" style="display: none;">
+            <section class="dashboard-section">
+                <div class="container">
+                    <h2 class="section-title">📊 Analytics Dashboard</h2>
+
+                    <!-- Statistics Cards -->
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-icon">🍽️</div>
+                            <div class="stat-value" id="total-meals">0</div>
+                            <div class="stat-label">Total Meals</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon">🔥</div>
+                            <div class="stat-value" id="total-calories">0</div>
+                            <div class="stat-label">Total Calories</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon">📈</div>
+                            <div class="stat-value" id="avg-calories">0</div>
+                            <div class="stat-label">Avg Calories/Meal</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon">🎯</div>
+                            <div class="stat-value" id="accuracy-rate">0%</div>
+                            <div class="stat-label">Prediction Accuracy</div>
+                        </div>
+                    </div>
+
+                    <!-- Charts Row -->
+                    <div class="charts-grid">
+                        <div class="chart-card">
+                            <h3>📊 Daily Calorie Intake</h3>
+                            <canvas id="daily-chart"></canvas>
+                        </div>
+                        <div class="chart-card">
+                            <h3>🥗 Top Foods</h3>
+                            <canvas id="foods-chart"></canvas>
+                        </div>
+                    </div>
+
+                    <!-- Recent Activity -->
+                    <div class="activity-card">
+                        <h3>🕒 Recent Activity</h3>
+                        <div class="activity-list" id="activity-list">
+                            <p class="no-data">No activity yet</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- Preview Modal -->
+        <div id="preview-modal" class="modal">
+            <div class="modal-content">
+                <span class="modal-close" onclick="closePreview()">&times;</span>
+                <img id="preview-image" src="" alt="Preview">
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>

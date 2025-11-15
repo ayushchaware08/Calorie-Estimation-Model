@@ -11,16 +11,16 @@
                            │ HTTP Requests
                            ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│                      FASTAPI BACKEND                                 │
+│                      FASTAPI BACKEND                                │
 │  ┌────────────────────────────────────────────────────────────────┐ │
-│  │                    API ENDPOINTS                                │ │
-│  │                                                                  │ │
+│  │                    API ENDPOINTS                               │ │
+│  │                                                                │ │
 │  │  POST /predict/top3     ─────►  Get top-3 predictions          │ │
 │  │  POST /confirm          ─────►  Log user confirmation          │ │
 │  │  POST /custom-entry     ─────►  Record custom food             │ │
 │  │  GET  /nutritional-info ─────►  Lookup nutrition data          │ │
 │  │  GET  /logs/confirmations ───►  View confirmation logs         │ │
-│  │  GET  /logs/confirmation-stats►  Get statistics               │ │
+│  │  GET  /logs/confirmation-stats►  Get statistics                │ │
 │  └────────────────────────────────────────────────────────────────┘ │
 └───────────┬──────────────────────┬───────────────────┬──────────────┘
             │                      │                   │
@@ -39,7 +39,7 @@
                        │
                        ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│                       DATA LAYER                                     │
+│                       DATA LAYER                                   │
 │  ┌────────────────────┐  ┌────────────────────┐  ┌────────────────┐│
 │  │   calorie_db.py    │  │  prediction_logs   │  │   YOLOv8       ││
 │  │   ──────────────   │  │  ───────────────   │  │   Weights      ││

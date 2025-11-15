@@ -20,6 +20,9 @@ logger = logging.getLogger(__name__)
 
 ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*").split(",")
 
+# Session storage for predictions (in production, use Redis or similar)
+session_predictions = {}
+
 app = FastAPI(title="Calorie Estimation API")
 
 app.add_middleware(
@@ -175,8 +178,14 @@ async def predict_with_top3(file: UploadFile = File(...), session_id: Optional[s
         result["processing_time_ms"] = processing_time_ms
         result["image_size"] = f"{image_size[0]}x{image_size[1]}"
         
-        # Store in temporary session for later confirmation
-        # (In production, you might use Redis or similar for session management)
+        # Store predictions in session for later confirmation
+        session_predictions[session_id] = {
+            "predictions": result.get("top_predictions", []),
+            "timestamp": datetime.now().isoformat(),
+            "image_size": image_size,
+            "confidence_threshold": prediction_handler.confidence_threshold,
+            "is_confident": result.get("is_confident", False)
+        }
         
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": "Prediction failed", "detail": str(e)})
@@ -193,6 +202,19 @@ async def confirm_prediction(confirmation: UserConfirmationRequest):
         raise HTTPException(status_code=503, detail="Service not available")
     
     try:
+        # Retrieve stored predictions from session
+        session_data = session_predictions.get(confirmation.session_id)
+        if not session_data:
+            # Session not found, proceed with limited logging
+            logger.warning(f"Session {confirmation.session_id} not found in cache")
+            top_predictions = []
+            was_confident = None
+            confidence_threshold = 0.70
+        else:
+            top_predictions = session_data.get("predictions", [])
+            was_confident = session_data.get("is_confident", False)
+            confidence_threshold = session_data.get("confidence_threshold", 0.70)
+        
         # Determine what the user selected
         is_custom = confirmation.selected_option == 4 or confirmation.custom_food_name is not None
         
@@ -204,31 +226,46 @@ async def confirm_prediction(confirmation: UserConfirmationRequest):
             final_choice = confirmation.custom_food_name
             nutritional_info = prediction_handler.calculate_nutritional_info(final_choice)
         else:
-            # User selected one of the top predictions
-            # In production, you'd retrieve the predictions from session storage
-            # For now, we'll recalculate (this could be optimized)
-            final_choice = f"Selected option {confirmation.selected_option}"
-            nutritional_info = {"calories": 0, "protein": 0, "fats": 0}
+            # User selected one of the top predictions (1-3)
+            if not top_predictions:
+                raise HTTPException(status_code=400, detail="No predictions found for this session. Please upload an image first.")
+            
+            if confirmation.selected_option < 1 or confirmation.selected_option > len(top_predictions):
+                raise HTTPException(status_code=400, detail=f"Invalid selection. Please select 1-{len(top_predictions)} or 4 for custom.")
+            
+            selected_prediction = top_predictions[confirmation.selected_option - 1]
+            final_choice = selected_prediction.get("label", "unknown")
+            nutritional_info = {
+                "calories": selected_prediction.get("calories", 0),
+                "protein": selected_prediction.get("protein", 0),
+                "fats": selected_prediction.get("fats", 0)
+            }
         
-        # Log the confirmation
-        # Note: You'll need to store top_predictions in session to retrieve here
-        # For now, using empty list as placeholder
+        # Log the confirmation with all top-3 predictions
         confirmation_id = prediction_logger.log_user_confirmation(
             session_id=confirmation.session_id,
-            top_predictions=[],  # Should come from session storage
+            top_predictions=top_predictions,
             user_selection=confirmation.selected_option,
             final_choice=final_choice,
             is_custom_entry=is_custom,
-            custom_food_name=confirmation.custom_food_name,
+            custom_food_name=confirmation.custom_food_name if is_custom else None,
             nutritional_info=nutritional_info,
+            confidence_threshold=confidence_threshold,
+            was_confident=was_confident,
             notes=confirmation.notes
         )
+        
+        # Clean up session data after confirmation
+        if confirmation.session_id in session_predictions:
+            del session_predictions[confirmation.session_id]
         
         return {
             "confirmation_id": confirmation_id,
             "session_id": confirmation.session_id,
             "final_choice": final_choice,
             "nutritional_info": nutritional_info,
+            "user_selected_option": confirmation.selected_option,
+            "top_predictions_logged": len(top_predictions),
             "message": "Confirmation logged successfully"
         }
         
@@ -252,15 +289,17 @@ async def add_custom_food_entry(request: CustomFoodRequest):
             quantity=request.quantity
         )
         
-        # Log as custom entry
+        # Log as custom entry (no predictions available)
         confirmation_id = prediction_logger.log_user_confirmation(
             session_id=request.session_id,
-            top_predictions=[],
+            top_predictions=[],  # No predictions for manual entry
             user_selection=4,  # 4 = custom entry
             final_choice=request.food_name,
             is_custom_entry=True,
             custom_food_name=request.food_name,
             nutritional_info=nutritional_info,
+            confidence_threshold=None,
+            was_confident=None,
             notes=request.notes
         )
         
